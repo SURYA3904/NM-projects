@@ -1,0 +1,13 @@
+from gtts import gTTS
+from IPython.display import Audio
+
+def text_to_speech(text, lang='en'):
+    tts = gTTS(text=text, lang=lang)
+    filename = "output.mp3"
+    tts.save(filename)
+    return Audio(filename, autoplay=True)
+
+# Example usage
+user_text = input("Enter the text you want to convert to speech: ")
+text_to_speech(user_text)
+
