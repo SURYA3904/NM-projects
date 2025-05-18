@@ -1,0 +1,85 @@
+from transformers import pipeline
+from sentence_transformers import SentenceTransformer, util
+import torch
+
+# Load models
+qa_pipeline = pipeline("question-answering", model="distilbert-base-cased-distilled-squad")
+embedder = SentenceTransformer("all-MiniLM-L6-v2")
+
+# Knowledge base
+knowledge_base = {
+    "return": """
+        Our return policy allows customers to return products within 30 days of purchase. 
+        The item must be in its original condition and packaging. Refunds are processed within 5–7 business days.
+    """,
+    "shipping": """
+        We offer free shipping on orders over $50. Orders are processed in 2 business days and arrive in 5–10 days.
+    """,
+    "warranty": """
+        Electronics come with a 1-year warranty covering manufacturing defects. Proof of purchase is required.
+    """
+}
+
+# Conversation state
+conversation_state = {
+    "last_intent": None,
+    "confirmed_return_condition": False,
+    "proof_of_purchase": False
+}
+
+# Encode KB
+kb_keys = list(knowledge_base.keys())
+kb_embeddings = embedder.encode(kb_keys, convert_to_tensor=True)
+
+def classify_intent(user_input):
+    question_embedding = embedder.encode(user_input, convert_to_tensor=True)
+    scores = util.cos_sim(question_embedding, kb_embeddings)
+    best_match = torch.argmax(scores)
+    return kb_keys[best_match]
+
+def get_answer(intent, question):
+    context = knowledge_base[intent]
+    return qa_pipeline(question=question, context=context)['answer']
+
+def handle_conversation(user_input):
+    global conversation_state
+    # Step 1: Intent detection
+    intent = classify_intent(user_input)
+
+    # Step 2: State-based flow
+    if "return" in user_input.lower():
+        conversation_state['last_intent'] = "return"
+        return get_answer("return", user_input)
+    
+    if conversation_state["last_intent"] == "return":
+        if "yes" in user_input.lower():
+            if not conversation_state['confirmed_return_condition']:
+                conversation_state['confirmed_return_condition'] = True
+                return "Great! Please ensure it's packed securely. Do you have the receipt or proof of purchase?"
+            elif not conversation_state['proof_of_purchase']:
+                conversation_state['proof_of_purchase'] = True
+                return "Thanks! You can now proceed to initiate the return via our website or support line."
+        elif "no" in user_input.lower():
+            return "Unfortunately, we can only accept items in original condition."
+
+    if conversation_state["last_intent"] == "warranty":
+        if "yes" in user_input.lower():
+            return "Perfect. Please contact support with your proof and product details to start a warranty claim."
+
+    # Fallback to answering using intent
+    conversation_state['last_intent'] = intent
+    return get_answer(intent, user_input)
+
+# Run the bot
+if __name__ == "__main__":
+    print("Bot: Hello! How can I assist you today? (Type 'exit' to quit)\n")
+    while True:
+        user_input = input("Customer: ")
+        if user_input.lower() in ["exit","thank you", "quit"]:
+          print("\nBot: It was a pleasure assisting you today 😊")
+          print("Bot: If you have any more questions, feel free to reach out anytime.")
+          print("Bot: Have a wonderful day! 👋")
+          break
+
+        response = handle_conversation(user_input)
+        print(f"Bot: {response}\n")
